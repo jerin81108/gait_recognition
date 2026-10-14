@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gait Training Observer — Live Expected Output</title>
+  <meta name="description" content="Interactive gait model training visualizer that derives expected output by observing training steps in real time." />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- Annotation plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset & Base ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f14;
+      --surface:   #151820;
+      --surface2:  #1c2030;
+      --border:    #252a3a;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --accent:    #6366f1;
+      --accent2:   #06b6d4;
+      --green:     #22c55e;
+      --orange:    #f97316;
+      --red:       #ef4444;
+      --purple:    #a855f7;
+      --yellow:    #eab308;
+      --glow:      0 0 24px rgba(99,102,241,.25);
+      --radius:    14px;
+      --radius-sm: 8px;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 0 0 48px;
+      overflow-x: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #0d0f14 0%, #1a1040 50%, #0d0f14 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 28px 40px 24px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+    header::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 80% at 50% -20%, rgba(99,102,241,.18) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .logo {
+      width: 46px; height: 46px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 12px;
+      display: grid; place-items: center;
+      font-size: 22px;
+      box-shadow: var(--glow);
+      flex-shrink: 0;
+    }
+    .header-text h1 { font-size: 1.45rem; font-weight: 700; letter-spacing: -.02em; }
+    .header-text p  { font-size: .82rem; color: var(--muted); margin-top: 2px; }
+    .status-badge {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 7px;
+      background: rgba(34,197,94,.1);
+      border: 1px solid rgba(34,197,94,.25);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: .78rem; font-weight: 600; color: var(--green);
+    }
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--green);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)} }
+
+    /* ── Main Layout ─────────────────────────────────────────────────── */
+    main { padding: 32px 40px; max-width: 1400px; margin: 0 auto; }
+
+    /* ── Stat Cards ──────────────────────────────────────────────────── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .2s, transform .15s;
+    }
+    .stat-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .stat-card::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, var(--accent-color, var(--accent)) 0%, transparent 60%);
+      opacity: .05;
+    }
+    .stat-label  { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
+    .stat-value  { font-size: 1.55rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; line-height: 1; }
+    .stat-sub    { font-size: .72rem; margin-top: 5px; color: var(--muted); }
+    .stat-badge  {
+      display: inline-block;
+      padding: 2px 8px; border-radius: 6px;
+      font-size: .68rem; font-weight: 600;
+      margin-top: 6px;
+    }
+    .badge-green  { background: rgba(34,197,94,.12); color: var(--green); }
+    .badge-orange { background: rgba(249,115,22,.12); color: var(--orange); }
+    .badge-purple { background: rgba(168,85,247,.12); color: var(--purple); }
+    .badge-cyan   { background: rgba(6,182,212,.12);  color: var(--accent2); }
+
+    /* ── Observer Panel ──────────────────────────────────────────────── */
+    .observer-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 26px;
+      margin-bottom: 24px;
+    }
+    .observer-title {
+      font-size: .8rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .07em; color: var(--accent2);
+      margin-bottom: 16px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .observer-title::before {
+      content: ''; display: block;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent2);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    /* ── Controls ────────────────────────────────────────────────────── */
+    .controls {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    }
+    .btn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 9px 18px; border-radius: var(--radius-sm);
+      border: none; cursor: pointer;
+      font-size: .82rem; font-weight: 600; font-family: inherit;
+      transition: all .18s;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #818cf8);
+      color: #fff;
+      box-shadow: 0 2px 12px rgba(99,102,241,.35);
+    }
+    .btn-primary:hover { opacity: .88; transform: translateY(-1px); box-shadow: 0 4px 18px rgba(99,102,241,.5); }
+    .btn-secondary {
+      background: var(--surface2); color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+    .btn:disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
+
+    .speed-label { font-size: .78rem; color: var(--muted); }
+    .speed-select {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: var(--radius-sm);
+      padding: 8px 10px; font-size: .8rem; font-family: inherit;
+      cursor: pointer;
+    }
+    .speed-select:focus { outline: none; border-color: var(--accent); }
+
+    /* Slider */
+    .slider-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+    .slider-row label { font-size: .78rem; color: var(--muted); white-space: nowrap; }
+    input[type=range] {
+      flex: 1; appearance: none; height: 4px;
+      background: var(--border); border-radius: 2px; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      appearance: none; width: 16px; height: 16px; border-radius: 50%;
+      background: var(--accent); cursor: pointer;
+      box-shadow: 0 0 6px rgba(99,102,241,.6);
+      transition: transform .15s;
+    }
+    input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.25); }
+    .epoch-display {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .82rem; font-weight: 600;
+      color: var(--accent2); white-space: nowrap; min-width: 80px; text-align: right;
+    }
+
+    /* ── Observed predictions table ──────────────────────────────────── */
+    .prediction-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px; margin-top: 14px;
+    }
+    .pred-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+    }
+    .pred-box-title { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .pred-box-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.05rem; font-weight: 700;
+      margin-top: 4px;
+    }
+    .pred-box-method { font-size: .67rem; color: var(--muted); margin-top: 3px; }
+
+    /* ── Charts ──────────────────────────────────────────────────────── */
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+      position: relative;
+    }
+    .chart-card-title {
+      font-size: .82rem; font-weight: 700;
+      margin-bottom: 16px; color: var(--text);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .chart-card-title span {
+      font-size: .7rem; font-weight: 500;
+      padding: 3px 8px; border-radius: 5px;
+      background: rgba(99,102,241,.12); color: var(--accent);
+    }
+    .chart-wrap { position: relative; height: 320px; }
+
+    /* ── Log Feed ────────────────────────────────────────────────────── */
+    .log-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 22px;
+      margin-top: 20px;
+    }
+    .log-title { font-size: .78rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+    .log-feed {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .73rem;
+      max-height: 150px; overflow-y: auto;
+      line-height: 1.7;
+      color: #94a3b8;
+    }
+    .log-feed::-webkit-scrollbar { width: 4px; }
+    .log-feed::-webkit-scrollbar-track { background: var(--surface2); }
+    .log-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .log-line { display: flex; gap: 10px; }
+    .log-line .tag  { color: var(--accent); font-weight: 600; }
+    .log-line .ep   { color: var(--accent2); }
+    .log-line .val  { color: var(--green); }
+    .log-line .pred { color: var(--yellow); }
+
+    /* ── Progress bar ────────────────────────────────────────────────── */
+    .progress-bar-wrap {
+      height: 3px; background: var(--border); border-radius: 2px; margin-top: 8px;
+    }
+    .progress-bar-fill {
+      height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 2px; transition: width .3s ease;
+      width: 0%;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">🧠</div>
+  <div class="header-text">
+    <h1>Gait Training Observer</h1>
+    <p>Watches each training step and derives the Expected Output line dynamically from observed trends</p>
+  </div>
+  <div class="status-badge">
+    <div class="status-dot"></div>
+    <span id="liveStatus">Ready</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Stat Cards ───────────────────────────────────────────────────── -->
+  <div class="stat-grid">
+    <div class="stat-card" style="--accent-color:#6366f1">
+      <div class="stat-label">Current Epoch</div>
+      <div class="stat-value" id="sc-epoch">—</div>
+      <div class="stat-sub">of 216 total</div>
+    </div>
+    <div class="stat-card" style="--accent-color:#22c55e">
+      <div class="stat-label">Val Loss (Observed)</div>
+      <div class="stat-value" id="sc-vloss" style="color:var(--green)">—</div>
+      <div class="stat-sub" id="sc-vloss-sub">—</div>
+    </div>
+    <div class="stat-card" style="--accent-color:#f97316">
+      <div class="stat-label">Train Loss (Observed)</div>
+      <div class="stat-value" id="sc-tloss" style="color:var(--orange)">—</div>
+      <div class="stat-sub" id="sc-tloss-sub">—</div>
+    </div>
+    <div class="stat-card" style="--accent-color:#6366f1">
+      <div class="stat-label">ID Accuracy</div>
+      <div class="stat-value" id="sc-idacc" style="color:var(--accent)">—</div>
+      <div class="stat-sub" id="sc-idacc-sub">—</div>
+    </div>
+    <div class="stat-card" style="--accent-color:#06b6d4">
+      <div class="stat-label">Gender Accuracy</div>
+      <div class="stat-value" id="sc-gacc" style="color:var(--accent2)">—</div>
+      <div class="stat-sub" id="sc-gacc-sub">—</div>
+    </div>
+    <div class="stat-card" style="--accent-color:#a855f7">
+      <div class="stat-label">Predicted Final Loss</div>
+      <div class="stat-value" id="sc-pred" style="color:var(--purple)">—</div>
+      <div class="stat-sub">Derived from observed trend</div>
+    </div>
+  </div>
+
+  <!-- ── Observer Panel ───────────────────────────────────────────────── -->
+  <div class="observer-panel">
+    <div class="observer-title">Live Step Observer — Expected Output Derived from Trend</div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button class="btn btn-primary" id="btnPlay" onclick="togglePlay()">▶ Play</button>
+      <button class="btn btn-secondary" onclick="stepForward()">Step →</button>
+      <button class="btn btn-secondary" onclick="stepBack()">← Back</button>
+      <button class="btn btn-secondary" onclick="reset()">↺ Reset</button>
+      <span class="speed-label">Speed:</span>
+      <select class="speed-select" id="speedSel" onchange="updateSpeed()">
+        <option value="800">0.5×</option>
+        <option value="400" selected>1×</option>
+        <option value="200">2×</option>
+        <option value="80">5×</option>
+        <option value="30">10×</option>
+      </select>
+    </div>
+
+    <div class="slider-row">
+      <label>Epoch:</label>
+      <input type="range" id="epochSlider" min="0" max="0" value="0" oninput="sliderMoved(this.value)" />
+      <div class="epoch-display" id="epochDisplay">0 / 0</div>
+    </div>
+
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progressFill"></div>
+    </div>
+
+    <!-- Computed Expected Outputs -->
+    <div class="prediction-row" id="predRow">
+      <div class="pred-box">
+        <div class="pred-box-title">🎯 Expected Final Val-Loss</div>
+        <div class="pred-box-value" id="pred-vloss" style="color:var(--green)">—</div>
+        <div class="pred-box-method">Exponential decay extrapolation</div>
+      </div>
+      <div class="pred-box">
+        <div class="pred-box-title">📈 Expected Final ID Acc</div>
+        <div class="pred-box-value" id="pred-idacc" style="color:var(--accent)">—</div>
+        <div class="pred-box-method">Plateau detection on observed steps</div>
+      </div>
+      <div class="pred-box">
+        <div class="pred-box-title">⚥ Expected Final G-Acc</div>
+        <div class="pred-box-value" id="pred-gacc" style="color:var(--accent2)">—</div>
+        <div class="pred-box-method">Plateau detection on observed steps</div>
+      </div>
+      <div class="pred-box">
+        <div class="pred-box-title">📉 Convergence Epoch</div>
+        <div class="pred-box-value" id="pred-conv" style="color:var(--yellow)">—</div>
+        <div class="pred-box-method">Patience window from observed steps</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Charts ───────────────────────────────────────────────────────── -->
+  <div class="chart-grid">
+    <div class="chart-card">
+      <div class="chart-card-title">
+        Loss Reduction
+        <span>Expected Output = computed from observed steps</span>
+      </div>
+      <div class="chart-wrap"><canvas id="lossChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-title">
+        Validation Accuracy
+        <span>Expected Output = computed from observed steps</span>
+      </div>
+      <div class="chart-wrap"><canvas id="accChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ── Log Feed ─────────────────────────────────────────────────────── -->
+  <div class="log-card">
+    <div class="log-title">📋 Training Step Log</div>
+    <div class="log-feed" id="logFeed"></div>
+  </div>
+
+</main>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   DATA — checkpoint readings from the training log
+   ═══════════════════════════════════════════════════════════════════════════ */
+const CHECKPOINTS = [
+  { epoch:  1,  tLoss: 2.1865, vLoss: 2.0771, idAcc: 25.0, gAcc: 62.5 },
+  { epoch: 10,  tLoss: 1.5646, vLoss: 1.6161, idAcc: 62.5, gAcc: 75.0 },
+  { epoch: 20,  tLoss: 1.1861, vLoss: 1.3360, idAcc: 62.5, gAcc: 87.5 },
+  { epoch: 30,  tLoss: 1.0784, vLoss: 1.2464, idAcc: 62.5, gAcc: 87.5 },
+  { epoch: 40,  tLoss: 0.9913, vLoss: 1.2065, idAcc: 62.5, gAcc: 87.5 },
+  { epoch: 50,  tLoss: 1.0154, vLoss: 1.2522, idAcc: 62.5, gAcc: 75.0 },
+  { epoch: 60,  tLoss: 0.9549, vLoss: 1.3249, idAcc: 62.5, gAcc: 87.5 },
+  { epoch: 70,  tLoss: 0.9792, vLoss: 1.1849, idAcc: 62.5, gAcc: 87.5 },
+  { epoch: 80,  tLoss: 0.9330, vLoss: 1.3911, idAcc: 62.5, gAcc: 87.5 },
+  { epoch: 90,  tLoss: 0.9588, vLoss: 1.2147, idAcc: 62.5, gAcc: 87.5 },
+  { epoch:100,  tLoss: 0.9177, vLoss: 1.1205, idAcc: 75.0, gAcc: 87.5 },
+  { epoch:110,  tLoss: 0.9511, vLoss: 1.1855, idAcc: 62.5, gAcc: 87.5 },
+  { epoch:120,  tLoss: 0.9113, vLoss: 1.1802, idAcc: 62.5, gAcc: 87.5 },
+  { epoch:130,  tLoss: 0.9522, vLoss: 1.3428, idAcc: 62.5, gAcc: 87.5 },
+  { epoch:140,  tLoss: 0.9330, vLoss: 1.1862, idAcc: 62.5, gAcc: 87.5 },
+  { epoch:150,  tLoss: 0.9127, vLoss: 1.1004, idAcc: 75.0, gAcc: 87.5 },
+  { epoch:160,  tLoss: 0.9357, vLoss: 1.1133, idAcc: 75.0, gAcc: 87.5 },
+  { epoch:170,  tLoss: 0.9292, vLoss: 1.1945, idAcc: 62.5, gAcc: 87.5 },
+  { epoch:180,  tLoss: 0.9055, vLoss: 1.1037, idAcc: 75.0, gAcc: 87.5 },
+  { epoch:190,  tLoss: 0.8702, vLoss: 1.1273, idAcc: 75.0, gAcc: 87.5 },
+  { epoch:200,  tLoss: 0.8831, vLoss: 1.0978, idAcc: 75.0, gAcc: 87.5 },
+  { epoch:210,  tLoss: 0.9247, vLoss: 1.0911, idAcc: 75.0, gAcc: 87.5 },
+  { epoch:216,  tLoss: 0.8800, vLoss: 1.0809, idAcc: 75.0, gAcc: 87.5 },
+];
+
+const TOTAL_EPOCHS = 216;
+
+/* ─── Interpolate checkpoints to every epoch ─────────────────────────── */
+function interp(ckpts, key) {
+  const xs = ckpts.map(c => c.epoch);
+  const ys = ckpts.map(c => c[key]);
+  const out = [];
+  for (let e = 1; e <= TOTAL_EPOCHS; e++) {
+    if (e <= xs[0]) { out.push(ys[0]); continue; }
+    if (e >= xs[xs.length-1]) { out.push(ys[ys.length-1]); continue; }
+    let i = 0;
+    while (xs[i+1] < e) i++;
+    const t = (e - xs[i]) / (xs[i+1] - xs[i]);
+    out.push(ys[i] + t * (ys[i+1] - ys[i]));
+  }
+  return out;
+}
+
+const ALL_EPOCHS = Array.from({length: TOTAL_EPOCHS}, (_, i) => i + 1);
+const ALL_TLOSS  = interp(CHECKPOINTS, 'tLoss');
+const ALL_VLOSS  = interp(CHECKPOINTS, 'vLoss');
+const ALL_IDACC  = interp(CHECKPOINTS, 'idAcc');
+const ALL_GACC   = interp(CHECKPOINTS, 'gAcc');
+
+/* ─── Expected Output Derivation ────────────────────────────────────────
+   Given the OBSERVED steps so far, compute expected final values using:
+   • Val-loss: exponential-decay curve fit  y = a + b*exp(-k*x)
+   • Accuracy: rolling plateau detection    (last N steps std)
+   ─────────────────────────────────────────────────────────────────────── */
+function deriveExpected(visibleCount) {
+  if (visibleCount < 3) return null;
+
+  const obs = ALL_EPOCHS.slice(0, visibleCount);
+  const vl  = ALL_VLOSS.slice(0, visibleCount);
+  const tl  = ALL_TLOSS.slice(0, visibleCount);
+  const id  = ALL_IDACC.slice(0, visibleCount);
+  const ga  = ALL_GACC.slice(0, visibleCount);
+
+  // ── Val-loss: least-squares exponential fit  y = a + b·e^(-k·x) ─────
+  // Linearise: if we assume the floor 'a' ≈ min observed value * 0.9
+  const vFloor = Math.min(...vl) * 0.88;
+  const shifted = vl.map((v, i) => ({ x: obs[i], y: Math.max(v - vFloor, 1e-6) }));
+  // log-linear regression on shifted values
+  let sx=0, sy=0, sxx=0, sxy=0, n=shifted.length;
+  shifted.forEach(({x,y}) => { const ly=Math.log(y); sx+=x; sy+=ly; sxx+=x*x; sxy+=x*ly; });
+  const k  = -(sxy*n - sx*sy) / (sxx*n - sx*sx);  // decay rate (positive ≈ good)
+  const lnb = (sy - (-k)*sx) / n;
+  // Predicted value at epoch 216
+  const predVLoss = vFloor + Math.exp(lnb) * Math.exp(-k * TOTAL_EPOCHS);
+
+  // ── Accuracy: plateau = rolling std over last window ────────────────
+  const W = Math.min(visibleCount, 30);
+  const idWin = id.slice(-W);
+  const gaWin = ga.slice(-W);
+  const idMean = idWin.reduce((a,b)=>a+b,0)/W;
+  const gaMean = gaWin.reduce((a,b)=>a+b,0)/W;
+  const idStd  = Math.sqrt(idWin.map(v=>(v-idMean)**2).reduce((a,b)=>a+b,0)/W);
+  const gaStd  = Math.sqrt(gaWin.map(v=>(v-gaMean)**2).reduce((a,b)=>a+b,0)/W);
+  // If plateau (std < threshold), plateau value IS the expected output
+  const predIdAcc  = idStd < 3.0 ? idMean : Math.max(...id);
+  const predGaAcc  = gaStd < 3.0 ? gaMean : Math.max(...ga);
+
+  // ── Convergence epoch estimate ───────────────────────────────────────
+  // Estimate when improvement < 0.001 using current decay rate
+  let convEpoch = TOTAL_EPOCHS;
+  if (k > 0) {
+    // find x where derivative drops below threshold
+    convEpoch = Math.round(Math.log(0.005 / Math.max(Math.exp(lnb) * k, 1e-9)) / (-k));
+    convEpoch = Math.max(visibleCount, Math.min(convEpoch, 500));
+  }
+
+  return {
+    predVLoss: Math.max(0.5, predVLoss),
+    predIdAcc: Math.round(predIdAcc * 2) / 2,    // round to nearest 0.5
+    predGaAcc: Math.round(predGaAcc * 2) / 2,
+    convEpoch
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHART SETUP
+   ═══════════════════════════════════════════════════════════════════════════ */
+Chart.defaults.color = '#64748b';
+Chart.defaults.borderColor = '#252a3a';
+Chart.defaults.font.family = "'Inter', sans-serif";
+
+const CHART_OPTS = (yLabel, yMin, yMax) => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 0 },
+  interaction: { mode: 'index', intersect: false },
+  scales: {
+    x: {
+      type: 'linear',
+      title: { display: true, text: 'Epochs', color: '#64748b', font: { size: 11 } },
+      grid: { color: '#1c2030' },
+      ticks: { color: '#64748b', maxTicksLimit: 8 },
+      min: 0, max: TOTAL_EPOCHS + 4,
+    },
+    y: {
+      title: { display: true, text: yLabel, color: '#64748b', font: { size: 11 } },
+      grid: { color: '#1c2030' },
+      ticks: { color: '#64748b' },
+      min: yMin, max: yMax,
+    }
+  },
+  plugins: {
+    legend: {
+      labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } }
+    },
+    tooltip: {
+      backgroundColor: '#151820',
+      borderColor: '#252a3a',
+      borderWidth: 1,
+      titleColor: '#e2e8f0',
+      bodyColor: '#94a3b8',
+      callbacks: {
+        label: ctx => ` ${ctx.dataset.label}: ${typeof ctx.parsed.y === 'number' ? ctx.parsed.y.toFixed(4) : ctx.parsed.y}`
+      }
+    },
+    annotation: { annotations: {} }
+  }
+});
+
+/* Loss chart */
+const lossCtx = document.getElementById('lossChart').getContext('2d');
+const lossChart = new Chart(lossCtx, {
+  type: 'line',
+  data: {
+    datasets: [
+      {
+        label: 'Train Loss (observed)', data: [],
+        borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,.08)',
+        borderWidth: 2.2, pointRadius: 0, tension: 0.35, fill: true,
+      },
+      {
+        label: 'Val Loss (observed)', data: [],
+        borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,.05)',
+        borderWidth: 2.2, pointRadius: 0, tension: 0.35, fill: true,
+      },
+      {
+        label: '— Expected Val-Loss (derived)', data: [],
+        borderColor: '#22c55e', backgroundColor: 'transparent',
+        borderWidth: 2, borderDash: [], pointRadius: 0, tension: 0,
+      },
+      {
+        label: '- - Baseline (epoch 1 val-loss)', data: [],
+        borderColor: '#64748b', backgroundColor: 'transparent',
+        borderWidth: 1.5, borderDash: [6,4], pointRadius: 0, tension: 0,
+      },
+    ]
+  },
+  options: CHART_OPTS('CrossEntropy Loss', 0.4, 2.6)
+});
+
+/* Accuracy chart */
+const accCtx = document.getElementById('accChart').getContext('2d');
+const accChart = new Chart(accCtx, {
+  type: 'line',
+  data: {
+    datasets: [
+      {
+        label: 'ID Accuracy (observed)', data: [],
+        borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,.08)',
+        borderWidth: 2.2, pointRadius: 0, tension: 0.35, fill: true,
+      },
+      {
+        label: 'Gender Accuracy (observed)', data: [],
+        borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,.05)',
+        borderWidth: 2.2, pointRadius: 0, tension: 0.35, fill: true,
+      },
+      {
+        label: '— Expected ID Acc (derived)', data: [],
+        borderColor: '#6366f1', backgroundColor: 'transparent',
+        borderWidth: 2, borderDash: [5,3], pointRadius: 0, tension: 0,
+      },
+      {
+        label: '— Expected G-Acc (derived)', data: [],
+        borderColor: '#06b6d4', backgroundColor: 'transparent',
+        borderWidth: 2, borderDash: [5,3], pointRadius: 0, tension: 0,
+      },
+      {
+        label: '· · Random ID (25%)', data: [],
+        borderColor: '#ef4444', backgroundColor: 'transparent',
+        borderWidth: 1.2, borderDash: [2,4], pointRadius: 0, tension: 0,
+      },
+    ]
+  },
+  options: CHART_OPTS('Accuracy (%)', 15, 105)
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STATE & PLAYBACK
+   ═══════════════════════════════════════════════════════════════════════════ */
+let currentStep = 0;   // how many epochs are revealed (1-based index)
+let playing     = false;
+let timer       = null;
+let intervalMs  = 400;
+
+const slider   = document.getElementById('epochSlider');
+slider.max     = TOTAL_EPOCHS;
+
+function updateSpeed() {
+  intervalMs = parseInt(document.getElementById('speedSel').value);
+  if (playing) { clearInterval(timer); timer = setInterval(tick, intervalMs); }
+}
+
+function togglePlay() {
+  playing = !playing;
+  document.getElementById('btnPlay').textContent = playing ? '⏸ Pause' : '▶ Play';
+  document.getElementById('liveStatus').textContent = playing ? 'Observing…' : 'Paused';
+  if (playing) timer = setInterval(tick, intervalMs);
+  else         clearInterval(timer);
+}
+
+function tick() {
+  if (currentStep >= TOTAL_EPOCHS) {
+    clearInterval(timer); playing = false;
+    document.getElementById('btnPlay').textContent = '▶ Play';
+    document.getElementById('liveStatus').textContent = 'Complete';
+    return;
+  }
+  currentStep++;
+  render();
+}
+
+function stepForward() { if (currentStep < TOTAL_EPOCHS) { currentStep++; render(); } }
+function stepBack()    { if (currentStep > 0)            { currentStep--; render(); } }
+function reset()       {
+  clearInterval(timer); playing = false; currentStep = 0;
+  document.getElementById('btnPlay').textContent = '▶ Play';
+  document.getElementById('liveStatus').textContent = 'Ready';
+  render();
+}
+function sliderMoved(v) { currentStep = parseInt(v); render(); }
+
+/* ─── Point helpers ─────────────────────────────────────────────────── */
+function pts(epochs, values, count) {
+  return epochs.slice(0, count).map((e, i) => ({ x: e, y: values[i] }));
+}
+function hline(y, epochs) {
+  if (y === null || isNaN(y)) return [];
+  return [{ x: 1, y }, { x: TOTAL_EPOCHS + 2, y }];
+}
+
+/* ─── Main render ────────────────────────────────────────────────────── */
+let logLines = [];
+
+function render() {
+  const n = currentStep;
+  slider.value = n;
+  document.getElementById('epochDisplay').textContent = `${n} / ${TOTAL_EPOCHS}`;
+  document.getElementById('progressFill').style.width = `${(n/TOTAL_EPOCHS*100).toFixed(1)}%`;
+
+  // Derive expected from observed
+  const exp = n >= 3 ? deriveExpected(n) : null;
+
+  /* Stat cards */
+  if (n > 0) {
+    const e = ALL_EPOCHS[n-1], tl=ALL_TLOSS[n-1], vl=ALL_VLOSS[n-1], id=ALL_IDACC[n-1], ga=ALL_GACC[n-1];
+    document.getElementById('sc-epoch').textContent  = e;
+    document.getElementById('sc-vloss').textContent  = vl.toFixed(4);
+    document.getElementById('sc-tloss').textContent  = tl.toFixed(4);
+    document.getElementById('sc-idacc').textContent  = id.toFixed(1) + '%';
+    document.getElementById('sc-gacc').textContent   = ga.toFixed(1) + '%';
+    document.getElementById('sc-vloss-sub').textContent = vl < ALL_VLOSS[0] ? `↓ ${(ALL_VLOSS[0]-vl).toFixed(4)} from start` : '—';
+    document.getElementById('sc-tloss-sub').textContent = tl < ALL_TLOSS[0] ? `↓ ${(ALL_TLOSS[0]-tl).toFixed(4)} from start` : '—';
+    document.getElementById('sc-idacc-sub').textContent = id > ALL_IDACC[0] ? `↑ ${(id-ALL_IDACC[0]).toFixed(1)}% from start` : '—';
+    document.getElementById('sc-gacc-sub').textContent  = ga > ALL_GACC[0]  ? `↑ ${(ga-ALL_GACC[0]).toFixed(1)}% from start`  : '—';
+    document.getElementById('sc-pred').textContent   = exp ? exp.predVLoss.toFixed(4) : '…';
+  } else {
+    ['sc-epoch','sc-vloss','sc-tloss','sc-idacc','sc-gacc','sc-pred'].forEach(id => document.getElementById(id).textContent = '—');
+  }
+
+  /* Prediction boxes */
+  if (exp) {
+    document.getElementById('pred-vloss').textContent = exp.predVLoss.toFixed(4);
+    document.getElementById('pred-idacc').textContent = exp.predIdAcc.toFixed(1) + '%';
+    document.getElementById('pred-gacc').textContent  = exp.predGaAcc.toFixed(1) + '%';
+    document.getElementById('pred-conv').textContent  = `~${exp.convEpoch}`;
+  } else {
+    ['pred-vloss','pred-idacc','pred-gacc','pred-conv'].forEach(id => document.getElementById(id).textContent = 'Observing…');
+  }
+
+  /* Loss chart datasets */
+  const epts = pts(ALL_EPOCHS, ALL_TLOSS, n);
+  const vpts = pts(ALL_EPOCHS, ALL_VLOSS, n);
+  lossChart.data.datasets[0].data = epts;
+  lossChart.data.datasets[1].data = vpts;
+  // Expected val-loss line (derived, flat)
+  const predVL = exp ? exp.predVLoss : null;
+  lossChart.data.datasets[2].data = hline(predVL, ALL_EPOCHS);
+  lossChart.data.datasets[2].label = predVL !== null
+    ? `— Expected Val-Loss = ${predVL.toFixed(4)} (derived)`
+    : '— Expected Val-Loss (observing…)';
+  // Baseline = first observed val-loss
+  const baseline = n > 0 ? ALL_VLOSS[0] : null;
+  lossChart.data.datasets[3].data = hline(baseline, ALL_EPOCHS);
+  lossChart.data.datasets[3].label = baseline !== null
+    ? `- - Baseline = ${baseline.toFixed(4)} (epoch 1)`
+    : '- - Baseline';
+  lossChart.update('none');
+
+  /* Accuracy chart datasets */
+  accChart.data.datasets[0].data = pts(ALL_EPOCHS, ALL_IDACC, n);
+  accChart.data.datasets[1].data = pts(ALL_EPOCHS, ALL_GACC,  n);
+  const predId = exp ? exp.predIdAcc : null;
+  const predGa = exp ? exp.predGaAcc : null;
+  accChart.data.datasets[2].data  = hline(predId, ALL_EPOCHS);
+  accChart.data.datasets[2].label = predId !== null
+    ? `— Expected ID Acc = ${predId.toFixed(1)}% (derived)`
+    : '— Expected ID Acc (observing…)';
+  accChart.data.datasets[3].data  = hline(predGa, ALL_EPOCHS);
+  accChart.data.datasets[3].label = predGa !== null
+    ? `— Expected G-Acc = ${predGa.toFixed(1)}% (derived)`
+    : '— Expected G-Acc (observing…)';
+  accChart.data.datasets[4].data  = hline(25, ALL_EPOCHS);
+  accChart.update('none');
+
+  /* Log feed — only add new lines */
+  if (n > 0 && n > logLines.length) {
+    const e = ALL_EPOCHS[n-1];
+    const vl = ALL_VLOSS[n-1];
+    const tl = ALL_TLOSS[n-1];
+    const id = ALL_IDACC[n-1];
+    const ga = ALL_GACC[n-1];
+    const predStr = exp ? ` → expected: <span class="pred">${exp.predVLoss.toFixed(4)}</span>` : '';
+    const line = `<div class="log-line"><span class="tag">[OBS]</span><span class="ep">E${String(e).padStart(3,'0')}</span> T:<span class="val">${tl.toFixed(4)}</span> V:<span class="val">${vl.toFixed(4)}</span> ID:<span class="val">${id.toFixed(1)}%</span> G:<span class="val">${ga.toFixed(1)}%</span>${predStr}</div>`;
+    logLines.push(line);
+    const feed = document.getElementById('logFeed');
+    feed.innerHTML = logLines.join('');
+    feed.scrollTop = feed.scrollHeight;
+  } else if (n === 0) {
+    logLines = [];
+    document.getElementById('logFeed').innerHTML = '';
+  }
+}
+
+/* ─── Init ──────────────────────────────────────────────────────────── */
+render();
+</script>
+</body>
+</html>
